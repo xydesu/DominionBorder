@@ -1,0 +1,12 @@
+name: DominionBorder
+version: '1.0'
+main: me.xydesu.dominionborder.DominionBorderPlugin
+api-version: "1.20"
+depend: [Dominion]
+description: A plugin to visualize Dominion borders
+authors: [Gemini]
+commands:
+  dominionborder:
+    description: 主指令
+    aliases: [dborder]
+    usage: /dominionborder <reload|show>

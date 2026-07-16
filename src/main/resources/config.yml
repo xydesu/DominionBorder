@@ -1,0 +1,41 @@
+# DominionBorder Configuration
+
+# 顯示模式: BLOCK_DISPLAY 或 PARTICLE
+display-mode: BLOCK_DISPLAY
+
+# 邊界顯示持續時間 (秒)
+duration-seconds: 5
+
+# BlockDisplay 的預設方塊類型 (需為 Bukkit Material 名稱)
+# 例如: YELLOW_STAINED_GLASS, RED_STAINED_GLASS
+block-type: YELLOW_STAINED_GLASS
+
+# 不同事件的 BlockDisplay 專屬顏色
+# 如果想要針對特定事件修改顏色，可在此設定對應的材質名稱 (若留空或無效則會退回使用 block-type)
+colors:
+  select: YELLOW_STAINED_GLASS
+  create: LIME_STAINED_GLASS
+  enter: LIGHT_BLUE_STAINED_GLASS
+  view: PINK_STAINED_GLASS
+
+# BlockDisplay 的線框粗細 (預設: 0.15)
+border-thickness: 0.15
+
+# 顯示的最高格數限制（適用於 BLOCK_DISPLAY 模式）
+# 此設定會從玩家位置 Y-1 開始往上繪製指定的高度（但不超過領地原本的邊界）
+display-height: 15
+
+# Particle 使用的粒子類型 (需為 Bukkit Particle 名稱)
+# 例如: FLAME, HAPPY_VILLAGER, REDSTONE
+particle-type: HAPPY_VILLAGER
+
+# 粒子間距設定 (單位：格)，越小越密，會影響效能
+particle-pillar-step: 0.5
+particle-outline-step: 0.5
+
+# 觸發檢查的物品 (需為 Bukkit Material 名稱)
+# 當玩家手持此物品在領地內左鍵點擊時，會顯示邊界
+check-item: STRING
+
+# 是否開啟除錯模式 (將在後台輸出詳細記錄)
+debug: false

@@ -57,6 +57,26 @@ public class BorderVisualizer {
         }
     }
 
+    public void clearAllBorders() {
+        for (UUID uuid : activeBorders.keySet()) {
+            Player player = plugin.getServer().getPlayer(uuid);
+            if (player != null) {
+                clearBorder(player);
+            } else {
+                // 如果玩家已經離線，直接清空 task 與 displays
+                BorderData data = activeBorders.remove(uuid);
+                if (data != null) {
+                    if (data.task != null) data.task.cancel();
+                    if (data.displays != null) {
+                        for (BlockDisplay display : data.displays) {
+                            if (display.isValid()) display.remove();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     public void showBorder(Player player, CuboidDTO cuboid, String eventType) {
         // 先清除該玩家之前顯示的邊界，避免連點疊加
         clearBorder(player);
@@ -100,85 +120,124 @@ public class BorderVisualizer {
         double minZ = cuboid.z1();
         double maxX = cuboid.x2();
         double maxZ = cuboid.z2();
-        double maxY = cuboid.y2();
 
         if(eventType.equals("select")) {
             maxX += 1.0;
             maxZ += 1.0;
         }
-        
 
-        // 計算 Y 軸上下限
-        double playerY = player.getLocation().getY();
-        //int displayHeight = plugin.getConfig().getInt("display-height", 15);
-        
-        // 底部：取領地原本底部與玩家腳下的最小值 (不低於領地，也不低於玩家腳下)
-        double top = player.getWorld().getHighestBlockAt(player.getLocation()).getY();
-        double minY;
-        if(playerY > top) {
-            minY = Math.max(cuboid.y1(), top - 1.0);
-        } else {
-            minY = Math.max(cuboid.y1(), playerY - 1.0);
-        }
-        // 頂部：取領地原本頂部與 minY+displayHeight 之中的最小值 (不高於領地，也不超過設定顯示高度)
-        //double maxY = Math.min(cuboid.y2() + 1.0, minY + displayHeight);
-
-        // 如果計算後的上限低於下限，可能是因為玩家在遠低於/遠高於領地的地方
-        // 為了避免報錯，我們強制 maxY 至少等於 minY
-        if (maxY < minY) {
-            maxY = minY;
-        }
-
-        float sizeX = (float) (maxX - minX);
-        float sizeY = (float) (maxY - minY);
-        float sizeZ = (float) (maxZ - minZ);
+        int displayHeight = plugin.getConfig().getInt("display-height", 15);
         float thick = (float) plugin.getConfig().getDouble("border-thickness", 0.15); // 線框厚度
         if (thick <= 0.0f) thick = 0.15f; // 防止厚度為 0 導致完全隱形
 
-        // 6 個面的起點偏移量與大小 (Scale)
-        // {offsetX, offsetY, offsetZ, scaleX, scaleY, scaleZ}
-        float[][] faces = {
-                // 北面 (Z = z1)
-                {0, 0, 0, sizeX, sizeY, thick},
-                // 南面 (Z = z2)
-                {0, 0, sizeZ - thick, sizeX, sizeY, thick},
-                // 西面 (X = x1)
-                {0, 0, 0, thick, sizeY, sizeZ},
-                // 東面 (X = x2)
-                {sizeX - thick, 0, 0, thick, sizeY, sizeZ}
+        // 4 個垂直面的定義
+        // 為了讓高度隨地形變化，我們不再全域計算 Y，而是用 {offsetX, offsetZ, sizeX, sizeZ} 來定義 2D 的邊緣線
+        float sizeX = (float) (maxX - minX);
+        float sizeZ = (float) (maxZ - minZ);
+        
+        float[][] faces2D = {
+                // 北面 (Z = minZ)
+                {0, 0, sizeX, thick},
+                // 南面 (Z = maxZ)
+                {0, sizeZ - thick, sizeX, thick},
+                // 西面 (X = minX)
+                {0, 0, thick, sizeZ},
+                // 東面 (X = maxX)
+                {sizeX - thick, 0, thick, sizeZ}
         };
 
-        Location anchor = new Location(world, minX, minY, minZ);
+        Location anchor = new Location(world, minX, 0, minZ); // anchorY 將被動態取代
+        
+        double maxSeg = plugin.getConfig().getDouble("max-segment-size", 16.0);
+        if (maxSeg <= 0.1) maxSeg = 16.0;
+        float viewRange = 100.0f * (float) plugin.getConfig().getDouble("view-range-multiplier", 1.0);
 
-        for (float[] face : faces) {
-            // 計算面的起始點 (Corner)
-            double startX = anchor.getX() + face[0];
-            double startY = anchor.getY() + face[1];
-            double startZ = anchor.getZ() + face[2];
-            Location loc = new Location(world, startX, startY, startZ);
+        for (float[] face : faces2D) {
+            float startOffsetX = face[0];
+            float startOffsetZ = face[1];
+            float totalSizeX = face[2];
+            float totalSizeZ = face[3];
+            
+            boolean xIsThick = Math.abs(totalSizeX - thick) < 0.001f;
+            boolean zIsThick = Math.abs(totalSizeZ - thick) < 0.001f;
+            
+            // 沿著邊緣水平切割
+            int countX = xIsThick ? 1 : (int) Math.ceil(totalSizeX / maxSeg);
+            int countZ = zIsThick ? 1 : (int) Math.ceil(totalSizeZ / maxSeg);
+            
+            for (int ix = 0; ix < countX; ix++) {
+                for (int iz = 0; iz < countZ; iz++) {
+                    
+                    float segStartX = xIsThick ? 0 : (float) (ix * (totalSizeX / countX));
+                    float segStartZ = zIsThick ? 0 : (float) (iz * (totalSizeZ / countZ));
+                    
+                    float segSizeX = xIsThick ? thick : (float) (totalSizeX / countX);
+                    float segSizeZ = zIsThick ? thick : (float) (totalSizeZ / countZ);
+                    
+                    // 取得這個分段水平範圍內的最低地形高度
+                    double lowestTerrainY = 320; // 世界最高度
+                    double stepX = xIsThick ? 0 : 1.0;
+                    double stepZ = zIsThick ? 0 : 1.0;
+                    int loopCount = (int) Math.max(segSizeX, segSizeZ);
+                    if (loopCount <= 0) loopCount = 1;
 
-            BlockDisplay display = (BlockDisplay) world.spawnEntity(loc, EntityType.BLOCK_DISPLAY);
-            display.setBlock(blockData);
-            display.setViewRange(100.0f); // 增加客戶端渲染距離
+                    for (int step = 0; step <= loopCount; step++) {
+                        double checkX = anchor.getX() + startOffsetX + segStartX + step * stepX;
+                        double checkZ = anchor.getZ() + startOffsetZ + segStartZ + step * stepZ;
+                        
+                        // 確保不超過區段邊界
+                        if (!xIsThick) checkX = Math.min(checkX, anchor.getX() + startOffsetX + segStartX + segSizeX);
+                        if (!zIsThick) checkZ = Math.min(checkZ, anchor.getZ() + startOffsetZ + segStartZ + segSizeZ);
 
-            // 隱藏對其他玩家的顯示
-            for (Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
-                if (!p.equals(player)) {
-                    p.hideEntity(plugin, display);
+                        double ty = world.getHighestBlockYAt((int) checkX, (int) checkZ);
+                        if (ty < lowestTerrainY) {
+                            lowestTerrainY = ty;
+                        }
+                    }
+                    
+                    double terrainY = lowestTerrainY;
+                    
+                    // 根據地形計算該垂直柱的 Y 範圍 (保證一定會向上延伸 displayHeight)
+                    double segMinY = Math.max(cuboid.y1(), terrainY);
+                    double segMaxY = segMinY + displayHeight;
+                    
+                    if (segMaxY < segMinY) segMaxY = segMinY;
+                    float totalSizeY = (float) (segMaxY - segMinY);
+                    
+                    // 在 Y 軸上進行垂直切割
+                    int countY = (totalSizeY <= 0) ? 1 : (int) Math.ceil(totalSizeY / maxSeg);
+                    
+                    for (int iy = 0; iy < countY; iy++) {
+                        float segStartY = (float) (iy * (totalSizeY / countY));
+                        float segSizeY = (float) (totalSizeY / countY);
+                        
+                        double spawnX = anchor.getX() + startOffsetX + segStartX;
+                        double spawnY = segMinY + segStartY;
+                        double spawnZ = anchor.getZ() + startOffsetZ + segStartZ;
+                        Location loc = new Location(world, spawnX, spawnY, spawnZ);
+                        
+                        BlockDisplay display = (BlockDisplay) world.spawnEntity(loc, EntityType.BLOCK_DISPLAY);
+                        display.setBlock(blockData);
+                        display.setViewRange(viewRange);
+                        
+                        for (Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
+                            if (!p.equals(player)) {
+                                p.hideEntity(plugin, display);
+                            }
+                        }
+                        
+                        display.setTransformation(new Transformation(
+                                new Vector3f(0f, 0f, 0f),
+                                new org.joml.Quaternionf(),
+                                new Vector3f(segSizeX, segSizeY, segSizeZ),
+                                new org.joml.Quaternionf()
+                        ));
+                        
+                        display.setGlowing(false);
+                        displays.add(display);
+                    }
                 }
             }
-
-            // 直接以角落為原點，設定大小，不需要 Translation
-            display.setTransformation(new Transformation(
-                    new Vector3f(0f, 0f, 0f),
-                    new org.joml.Quaternionf(),
-                    new Vector3f(face[3], face[4], face[5]),
-                    new org.joml.Quaternionf()
-            ));
-
-            display.setGlowing(true); // 改成一整片的話，發光可能會太亮，所以關閉外框發光
-
-            displays.add(display);
         }
         
         plugin.debug("已成功為玩家 " + player.getName() + " 生成 " + displays.size() + " 個 BlockDisplay 面，使用材質: " + material.name());
@@ -208,29 +267,52 @@ public class BorderVisualizer {
 
         double x1 = Math.min(cuboid.x1(), cuboid.x2());
         double x2 = Math.max(cuboid.x1(), cuboid.x2());
-        double y1 = Math.min(cuboid.y1(), cuboid.y2());
-        double y2 = Math.max(cuboid.y1(), cuboid.y2());
         double z1 = Math.min(cuboid.z1(), cuboid.z2());
         double z2 = Math.max(cuboid.z1(), cuboid.z2());
+        
+        int displayHeight = plugin.getConfig().getInt("display-height", 15);
+        World world = player.getWorld();
 
         final List<double[]> pillarPoints = new ArrayList<>();
-        for (double y = y1; y <= y2; y += pillarVerticalStep) {
-            pillarPoints.add(new double[]{x1, y, z1});
-            pillarPoints.add(new double[]{x2, y, z1});
-            pillarPoints.add(new double[]{x1, y, z2});
-            pillarPoints.add(new double[]{x2, y, z2});
-        }
+        // 北西角
+        double tyNW = world.getHighestBlockYAt((int) x1, (int) z1);
+        double y1NW = Math.max(cuboid.y1(), tyNW);
+        for (double y = y1NW; y <= y1NW + displayHeight; y += pillarVerticalStep) pillarPoints.add(new double[]{x1, y, z1});
+        // 北東角
+        double tyNE = world.getHighestBlockYAt((int) x2, (int) z1);
+        double y1NE = Math.max(cuboid.y1(), tyNE);
+        for (double y = y1NE; y <= y1NE + displayHeight; y += pillarVerticalStep) pillarPoints.add(new double[]{x2, y, z1});
+        // 南西角
+        double tySW = world.getHighestBlockYAt((int) x1, (int) z2);
+        double y1SW = Math.max(cuboid.y1(), tySW);
+        for (double y = y1SW; y <= y1SW + displayHeight; y += pillarVerticalStep) pillarPoints.add(new double[]{x1, y, z2});
+        // 南東角
+        double tySE = world.getHighestBlockYAt((int) x2, (int) z2);
+        double y1SE = Math.max(cuboid.y1(), tySE);
+        for (double y = y1SE; y <= y1SE + displayHeight; y += pillarVerticalStep) pillarPoints.add(new double[]{x2, y, z2});
 
         final List<double[]> staticOutline = new ArrayList<>();
-        for (double y : new double[]{y1, y2}) {
-            for (double x = x1 + outlineStep; x < x2; x += outlineStep) {
-                staticOutline.add(new double[]{x, y, z1});
-                staticOutline.add(new double[]{x, y, z2});
-            }
-            for (double z = z1 + outlineStep; z < z2; z += outlineStep) {
-                staticOutline.add(new double[]{x1, y, z});
-                staticOutline.add(new double[]{x2, y, z});
-            }
+        for (double x = x1 + outlineStep; x < x2; x += outlineStep) {
+            double ty = world.getHighestBlockYAt((int) x, (int) z1);
+            double base = Math.max(cuboid.y1(), ty);
+            staticOutline.add(new double[]{x, base, z1});
+            staticOutline.add(new double[]{x, base + displayHeight, z1});
+            
+            ty = world.getHighestBlockYAt((int) x, (int) z2);
+            base = Math.max(cuboid.y1(), ty);
+            staticOutline.add(new double[]{x, base, z2});
+            staticOutline.add(new double[]{x, base + displayHeight, z2});
+        }
+        for (double z = z1 + outlineStep; z < z2; z += outlineStep) {
+            double ty = world.getHighestBlockYAt((int) x1, (int) z);
+            double base = Math.max(cuboid.y1(), ty);
+            staticOutline.add(new double[]{x1, base, z});
+            staticOutline.add(new double[]{x1, base + displayHeight, z});
+            
+            ty = world.getHighestBlockYAt((int) x2, (int) z);
+            base = Math.max(cuboid.y1(), ty);
+            staticOutline.add(new double[]{x2, base, z});
+            staticOutline.add(new double[]{x2, base + displayHeight, z});
         }
 
         final Particle finalParticle = particle;

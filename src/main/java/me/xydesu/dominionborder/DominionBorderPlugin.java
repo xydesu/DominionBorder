@@ -21,7 +21,8 @@ public class DominionBorderPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(listener, this);
 
         // 註冊指令
-        BorderCommand command = new BorderCommand(this, listener.getVisualizer());
+        this.visualizer = listener.getVisualizer();
+        BorderCommand command = new BorderCommand(this, visualizer);
         if (getCommand("dominionborder") != null) {
             getCommand("dominionborder").setExecutor(command);
             getCommand("dominionborder").setTabCompleter(command);
@@ -30,8 +31,13 @@ public class DominionBorderPlugin extends JavaPlugin {
         getLogger().info("DominionBorder 已啟用！");
     }
 
+    private BorderVisualizer visualizer;
+
     @Override
     public void onDisable() {
+        if (visualizer != null) {
+            visualizer.clearAllBorders();
+        }
         getLogger().info("DominionBorder 已停用！");
     }
 

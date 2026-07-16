@@ -19,15 +19,30 @@ import cn.lunadeer.dominion.api.dtos.CuboidDTO;
 import java.lang.reflect.Field;
 import java.util.Map;
 import java.util.UUID;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 public class BorderEventListener implements Listener {
 
     private final DominionBorderPlugin plugin;
     private final BorderVisualizer visualizer;
+    
+    // 快取反射欄位
+    private Field selectToolField;
+    private Field pointsSelectField;
 
     public BorderEventListener(DominionBorderPlugin plugin) {
         this.plugin = plugin;
         this.visualizer = new BorderVisualizer(plugin);
+        
+        try {
+            Class<?> configClass = Class.forName("cn.lunadeer.dominion.configuration.Configuration");
+            selectToolField = configClass.getField("selectTool");
+            
+            Class<?> dominionClass = Class.forName("cn.lunadeer.dominion.Dominion");
+            pointsSelectField = dominionClass.getField("pointsSelect");
+        } catch (Exception e) {
+            plugin.getLogger().warning("無法初始化 Dominion 反射欄位，圈地預覽功能可能無法正常運作。");
+        }
     }
 
     public BorderVisualizer getVisualizer() {
@@ -46,6 +61,11 @@ public class BorderEventListener implements Listener {
                 visualizer.showBorder(player, dom.getCuboid(), "create");
             }
         });
+    }
+
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        visualizer.clearBorder(event.getPlayer());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -124,9 +144,8 @@ public class BorderEventListener implements Listener {
         if (event.getItem() == null) return;
 
         try {
-            // 透過反射獲取 Dominion 的 selectTool
-            Class<?> configClass = Class.forName("cn.lunadeer.dominion.configuration.Configuration");
-            Field selectToolField = configClass.getField("selectTool");
+            if (selectToolField == null || pointsSelectField == null) return;
+            
             String selectToolStr = (String) selectToolField.get(null);
             Material selectTool = Material.matchMaterial(selectToolStr != null ? selectToolStr : "BONE");
 
@@ -134,9 +153,6 @@ public class BorderEventListener implements Listener {
                 return;
             }
 
-            // 透過反射獲取 Dominion.pointsSelect
-            Class<?> dominionClass = Class.forName("cn.lunadeer.dominion.Dominion");
-            Field pointsSelectField = dominionClass.getField("pointsSelect");
             @SuppressWarnings("unchecked")
             Map<UUID, Map<Integer, Location>> pointsSelect = (Map<UUID, Map<Integer, Location>>) pointsSelectField.get(null);
 

@@ -25,6 +25,16 @@ border-thickness: 0.15
 # 此設定會從玩家位置 Y-1 開始往上繪製指定的高度（但不超過領地原本的邊界）
 display-height: 15
 
+# 邊界顯示的單片最大尺寸 (預設 16.0)
+# 將牆面分割為多個小塊以避免單一材質過度變形，同時控制實體數量。
+# 數值越小，玻璃格數越多(越精細)，但實體數量越多。
+max-segment-size: 16.0
+
+# 邊界的客戶端顯示距離倍率 (預設 1.0)
+# 若希望進一步優化效能，可將此數值調低 (例如 0.5)。
+# 距離玩家較遠的 BlockDisplay 就會自動不被渲染，減少顯示卡負擔。
+view-range-multiplier: 1.0
+
 # Particle 使用的粒子類型 (需為 Bukkit Particle 名稱)
 # 例如: FLAME, HAPPY_VILLAGER, REDSTONE
 particle-type: HAPPY_VILLAGER

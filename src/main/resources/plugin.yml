@@ -4,7 +4,7 @@ main: me.xydesu.dominionborder.DominionBorderPlugin
 api-version: "1.20"
 depend: [Dominion]
 description: A plugin to visualize Dominion borders
-authors: [Gemini]
+authors: [xydesu]
 commands:
   dominionborder:
     description: 主指令
